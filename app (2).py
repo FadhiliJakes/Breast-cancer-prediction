@@ -1,92 +1,102 @@
 # Create a streamlit app
 import streamlit as st
 import pandas as pd
-import joblib
-import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense, Dropout
+from tensorflow.keras.optimizers import RMSprop
 
-# Load the model and scaler
-model = joblib.load('breast_cancer_model.pkl')
-scaler = joblib.load('scaler.pkl')
+# Title and description
+st.title("Cell Classification: Malignant or Benign")
+st.write("""
+This application trains a neural network to classify whether a cell is **malignant** or **benign**. 
+You can upload a dataset, train the model, and see the results interactively.
+""")
 
-st.title('Breast Cancer Prediction')
-st.write('Enter the cell measurements to predict if the tumor is benign or malignant')
-
-# Create input fields for features
-feature_names = ['radius', 'texture', 'perimeter', 'area', 'smoothness', 
-                'compactness', 'concavity', 'concave points', 'symmetry', 'fractal dimension']
-
-input_features = []
-for feature in feature_names:
-    value = st.number_input(f'Enter {feature}:', format='%f')
-    input_features.append(value)
-
-if st.button('Predict'):
-    # Scale features and predict
-    features_scaled = scaler.transform([input_features])
-    prediction = model.predict(features_scaled)[0]
+# File uploader
+uploaded_file = st.file_uploader("Upload your dataset (CSV format)", type=["csv"])
+if uploaded_file is not None:
+    # Load the data
+    df = pd.read_csv("/content/cleaned_data.csv")
+    st.write("Dataset preview:")
+    st.write(df.head())
     
-    if prediction == 1:
-        st.error('Prediction: Malignant')
+    if 'Diagnosis' not in df.columns:
+        st.error("The dataset must contain a 'Diagnosis' column for classification.")
     else:
-        st.success('Prediction: Benign')
+        # Preprocess the data
+        st.subheader("Model Training")
+        with st.spinner("Preparing data..."):
+            X = df.drop('Diagnosis', axis=1)
+            y = df['Diagnosis'].replace({'yes': 1, 'no': 0})
+            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-# Add information about the model
-st.info('Model Accuracy: 96.5%')
+            scaler = StandardScaler()
+            X_train = scaler.fit_transform(X_train)
+            X_test = scaler.transform(X_test)
 
-# Simulate a demo workflow for the app
-import streamlit as st
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
-import time
-import random
+        st.success("Data prepared successfully!")
 
-# Simulated data for demo
-@st.cache
-def load_demo_data():
-    data = pd.DataFrame({
-        'Feature1': np.random.normal(0, 1, 100),
-        'Feature2': np.random.normal(5, 2, 100),
-        'Feature3': np.random.normal(10, 3, 100),
-        'Target': np.random.choice([0, 1], size=100)
-    })
-    return data
+        # Build and compile the model
+        st.write("Building and training the model...")
+        model = Sequential([
+            Dense(128, activation='relu', input_shape=(X_train.shape[1],)),
+            Dropout(0.5),
+            Dense(64, activation='relu'),
+            Dropout(0.3),
+            Dense(1, activation='sigmoid')  # Binary classification output
+        ])
+        model.compile(loss='binary_crossentropy', optimizer=RMSprop(), metrics=['accuracy'])
 
-data = load_demo_data()
+        # Train the model
+        with st.spinner("Training the model..."):
+            history = model.fit(
+                X_train, y_train, 
+                batch_size=128, 
+                epochs=50, 
+                verbose=0, 
+                validation_data=(X_test, y_test)
+            )
 
-# Demo workflow
-st.title("Breast Cancer Prediction App - Demo")
+        st.success("Model trained successfully!")
 
-# Step 1: Data Visualization
-st.header("Step 1: Data Visualization")
-feature = st.selectbox("Select a feature to visualize:", data.columns[:-1])
-plt.figure(figsize=(10, 6))
-sns.histplot(data[feature], kde=True, bins=30)
-st.pyplot(plt)
+        # Display training accuracy and loss
+        st.subheader("Training Results")
+        st.line_chart(pd.DataFrame({
+            'Loss': history.history['loss'],
+            'Validation Loss': history.history['val_loss']
+        }))
+        st.line_chart(pd.DataFrame({
+            'Accuracy': history.history['accuracy'],
+            'Validation Accuracy': history.history['val_accuracy']
+        }))
 
-# Step 2: Monitoring Dashboard
-st.header("Step 2: Monitoring Dashboard")
-metric1 = st.empty()
-metric2 = st.empty()
-metric3 = st.empty()
+        # Evaluate the model
+        score = model.evaluate(X_test, y_test, verbose=0)
+        st.write(f"**Test Loss:** {score[0]:.4f}")
+        st.write(f"**Test Accuracy:** {score[1]:.4f}")
 
-for i in range(5):
-    metric1.metric(label="Accuracy", value=f"{random.uniform(90, 95):.2f}%")
-    metric2.metric(label="Prediction Count", value=random.randint(100, 200))
-    metric3.metric(label="Average Processing Time", value=f"{random.uniform(0.1, 0.5):.2f} sec")
-    time.sleep(1)
+        # Make predictions
+        predictions = model.predict(X_test)
+        predicted_classes = (predictions > 0.5).astype(int)
 
-# Step 3: Prediction Simulation
-st.header("Step 3: Prediction Simulation")
-input_data = {
-    'Feature1': st.number_input("Feature1", value=0.0),
-    'Feature2': st.number_input("Feature2", value=5.0),
-    'Feature3': st.number_input("Feature3", value=10.0)
-}
+        # Show predictions
+        st.subheader("Predictions on Test Data")
+        results_df = pd.DataFrame({
+            'Actual': y_test.values,
+            'Predicted': predicted_classes.flatten()
+        })
+        st.write(results_df)
 
-# Simulate prediction
-prediction = random.choice(["Benign", "Malignant"])
-st.write("Prediction:", prediction)
+        # Allow user to input new data for prediction
+        st.subheader("Make a New Prediction")
+        new_data = {}
+        for col in X.columns:
+            new_data[col] = st.number_input(f"Enter value for {col}", value=0.0)
 
-print("Demo workflow created and ready to run.")
+        if st.button("Predict"):
+            input_data = scaler.transform([list(new_data.values())])
+            new_prediction = model.predict(input_data)
+            prediction_class = "Malignant" if new_prediction > 0.5 else "Benign"
+            st.write(f"The prediction is: **{prediction_class}**")
